@@ -1,0 +1,51 @@
+Dynamic IP @ home
+#Import Aws module as we need it to do API calls
+Import-Module "C:\Program Files (x86)\AWS Tools\PowerShell\AWSPowerShell\AWSPowerShell.psd1"
+
+#Specify your AWS Keys and region
+$AWSAccessKey = ""
+$AWSSecretKey = ""
+$AWSRegion = ""
+
+#Specify location of file to store your IP address
+$OldIPFileLocation = "C:\myip.txt"
+
+#Specify Security group id to make the modifications and the port you'd like the rule for
+$SecurityGroupID = ""
+$port = ""
+#**********************************
+Set-AWSCredentials -AccessKey $AWSAccessKey -SecretKey $AWSSecretKey
+Set-DefaultAWSRegion -Region $AWSRegion
+
+$CurrentIP = (Invoke-WebRequest ifconfig.me/ip).Content.Trim()
+$CurrentIP = $CurrentIP + "/32"
+
+Write-Host "Current Public IP is $CurrentIP"
+
+$SecurityGroup = Get-EC2SecurityGroup -GroupId $SecurityGroupID
+
+#Check to see if file with old IP exists, if it does set $oldip to its contents, if it doesn't set $oldip to empty
+if ((test-path $OldIPFileLocation)  -eq $true){
+
+    $OldIP = Get-Content $OldIPFileLocation
+    Write-host "Found previous IP $OldIP from File $OldIPFileLocation"
+    If ($SecurityGroup.IpPermission | Where-Object {$_.FromPort -eq $port -and $_.IpRanges -eq $OldIP -and $_.IpProtocol -eq "tcp"}) {
+        write-host "Ingress rule for TCP Traffic on $port from $OldIP found" 
+
+        $RemoveIngress = @{ IpProtocol="tcp"; FromPort=$port; ToPort=$port; IpRanges=$OldIP}        
+        Revoke-EC2SecurityGroupIngress -GroupId $SecurityGroupID -IpPermission $RemoveIngress
+        write-host "Ingress rule DELETED" 
+    } else {write-host "No Ingress rule for TCP Traffic on $port from $OldIP found"}
+
+} else {
+    Write-host "No file at $OldIPFileLocation"
+
+}
+
+Write-Host "Adding Ingress rule for TCP Traffic on $port from $CurrentIP"
+
+$AddIngressSSH = @{ IpProtocol="tcp"; FromPort=$port; ToPort=$port; IpRanges=$CurrentIP}
+Grant-EC2SecurityGroupIngress -GroupId $SecurityGroupID -IpPermission $AddIngressSSH
+
+write-host "Saving Current IP $CurrentIP to $OldIPFileLocation"
+$CurrentIP > $OldIPFileLocation
